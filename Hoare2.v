@@ -2477,14 +2477,14 @@ Definition dfib (n : nat) : decorated := <{
       {{ Y = fib n }}
 }>.
 
-Theorem dfib_correct : forall n,
+(* Theorem dfib_correct : forall n,
   dec_correct (dfib n).
 Proof.
   intros. verify. assert (fib (st X) + fib (pred (st X)) = fib (S (st X))). 
   { apply fib_eqn. assumption. } simpl in H0. 
   assert (st X - 1 = pred(st X)) by lia. rewrite H1. assumption. 
   rewrite sub_0_r. reflexivity. simpl. rewrite sub_0_r. reflexivity. 
-Qed.
+Qed. *)
 
 End ImproveDcom. 
 (* 2020-09-09 21:08 *)
