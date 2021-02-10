@@ -2296,8 +2296,12 @@ Inductive dcom : Type :=
 .
 
 Inductive decorated :=
-  | Decorated : Assertion -> dcom -> Assertion -> decorated. 
+  | Decorated : dcom -> Assertion -> decorated. 
 
+Definition extract_dec (dec : decorated) :=
+  match dec with 
+  | Decorated d Q => d
+  end. 
 
 Declare Scope dcom_scope.
 Notation "'skip'"
@@ -2320,9 +2324,9 @@ Notation "'if' b 'then' d 'else' d' 'end'"
 Notation " d ; d' "
       := (DCSeq d d')
       (in custom com at level 90, right associativity) : dcom_scope. 
-Notation "{{ P }} d {{ Q }}"
-      := (Decorated P d Q)
-      (in custom com at level 91, P constr, Q constr) : dcom_scope. 
+Notation "d '->>>' {{ Q }}"
+      := (Decorated d Q)
+      (in custom com at level 91, Q constr) : dcom_scope. 
 
 Open Scope dcom_scope.
 
@@ -2341,11 +2345,6 @@ Fixpoint extract (d : dcom) : com :=
   | DCWhile b _ d       => CWhile b (extract d)
   end.
 
-Definition dec_correct (dec : decorated) :=
-  match dec with 
-  | Decorated P d Q => {{ P }} (extract d) {{ Q }}
-  end. 
-
 Fixpoint pre  (d : dcom) (Q : Assertion) : Assertion :=
   match d with
   | DCSkip                  => Q
@@ -2355,30 +2354,38 @@ Fixpoint pre  (d : dcom) (Q : Assertion) : Assertion :=
   | DCWhile b Pinv c        => Pinv
   end.
 
-Fixpoint verification_conditions (P : Assertion) (d : dcom) (Q : Assertion) : Prop :=
+Definition dec_correct (dec : decorated) :=
+  match dec with 
+  | Decorated d Q => {{ pre d Q }} (extract d) {{ Q }}
+  end. 
+
+Fixpoint verification_conditions_pre (P : Assertion) (d : dcom) (Q : Assertion) : Prop :=
   match d with
   | DCSkip =>
-      (P ->> Q)
+      P ->> Q
   | DCSeq d1 d2 =>
-      verification_conditions (pre d2 Q) d2 Q
-      /\ verification_conditions P d1 (pre d2 Q)
+      verification_conditions_pre P d1 (pre d2 Q) /\
+      verification_conditions_pre (pre d2 Q) d2 Q
   | DCAsgn X a =>
-      (P ->> Q [X |-> a])
+      P ->> Q [X |-> a]
   | DCIf b d1 d2 =>
-      verification_conditions (P /\ b) d1 Q 
-      /\ verification_conditions (P /\ ~ b) d2 Q
+      verification_conditions_pre (P /\ b) d1 Q /\
+      verification_conditions_pre (P /\ ~ b) d2 Q
   | DCWhile b Pinv d =>
-      (P ->> Pinv) /\ 
-      verification_conditions (Pinv /\ b) d Pinv /\
-      ((Pinv /\ ~b)%assertion ->> Q) 
+    P ->> Pinv /\
+    verification_conditions_pre (Pinv /\ b) d Pinv /\
+    (Pinv /\ ~ b)%assertion ->> Q
   end.
 
-Theorem verification_correct: forall d P Q,
-  verification_conditions P d Q -> {{P}} (extract d) {{Q}}. 
+Definition verification_conditions d Q := 
+  verification_conditions_pre (pre d Q) d Q. 
+
+Theorem verification_correct_pre: forall d P Q,
+  verification_conditions_pre P d Q -> {{P}} (extract d) {{Q}}. 
 Proof.
   induction d; intros; simpl in *. 
   - eapply hoare_consequence_pre. apply hoare_skip. assumption. 
-  - destruct H as [H1 H2]. eapply hoare_seq. apply IHd2. apply H1. 
+  - destruct H as [H1 H2]. eapply hoare_seq. apply IHd2. apply H2. 
     apply IHd1. assumption. 
   - eapply hoare_consequence_pre. apply hoare_asgn. assumption. 
   - destruct H as [H1 H2]. apply hoare_if.  apply IHd1 in H1. apply H1. 
@@ -2387,19 +2394,24 @@ Proof.
     apply hoare_while. apply IHd in H2. assumption. 
 Qed.
 
+Theorem verification_correct: forall d Q,
+  verification_conditions d Q -> {{pre d Q}} (extract d) {{Q}}. 
+Proof.
+  intros. apply verification_correct_pre. apply H. 
+Qed.
+
 Ltac verify :=
   intros;
   apply verification_correct;
   verify_assn.
 
 Example slow_assignment_dec (m : nat) : decorated := <{
-        {{ X = m }}
       Y := 0;
       while ~(X = 0) do
         X := X - 1;
         Y := Y + 1
       end
-        {{X + Y = m}}
+        {{X + Y = m}} ->>>
         {{ Y = m }} }>. 
 
 Theorem slow_assignment_dec_correct : forall m,
@@ -2408,7 +2420,6 @@ Proof. verify. Qed.
 
 Example subtract_slowly_dec (m : nat) (p : nat) : decorated :=
   <{
-    {{True}}
   X := m;
   Z := p;
   while ~(X = 0)
@@ -2416,44 +2427,36 @@ Example subtract_slowly_dec (m : nat) (p : nat) : decorated :=
      Z := Z - 1;
      X := X - 1
   end
-    {{ Z - X = p - m }}
+    {{ Z - X = p - m }} ->>>
     {{ Z = p - m }} }>.
 
 Theorem subtract_slowly_dec_correct : forall m p,
   dec_correct (subtract_slowly_dec m p).
 Proof. verify. (* this grinds for a bit! *) Qed.
 
-Definition swap_dec_prog : dcom :=
+Definition swap_dec m n : decorated :=
   <{
   X := X + Y;
   Y := X - Y;
-  X := X - Y
+  X := X - Y ->>>
+  {{X = n /\ Y = m}}
    }>. 
-
-Definition swap_dec (m n : nat) : decorated := 
-  Decorated (X = m /\ Y = n)%assertion swap_dec_prog
-  (X = n /\ Y = m)%assertion. 
 
 Theorem swap_correct : forall m n,
   dec_correct (swap_dec m n).
 Proof. 
-  verify; unfold assn_sub in H; simpl in H; destruct H as [H0 H1]; 
-  try rewrite t_update_eq in H0; try rewrite t_update_neq in H1; 
-  try rewrite t_update_neq in H0; try rewrite t_update_eq in H1; 
-  try lia; try (intros contra; discriminate).  
-  rewrite t_update_eq in H0. lia. 
-Qed.
+  verify. 
+Admitted.
 
 Definition div_mod_dec (a b : nat) : decorated :=
   <{
-  {{ True }}
   X := a;
   Y := 0;
   while b <= X do
     X := X - b;
     Y := Y + 1
   end
-  {{ b * Y + X = a }}
+  {{ b * Y + X = a }} ->>>
   {{ b * Y + X = a /\ (X < b) }} }>.
 
 Theorem div_mod_dec_correct : forall a b,
@@ -2463,7 +2466,6 @@ Proof.
 Qed.
 
 Definition dfib (n : nat) : decorated := <{
-    {{True}}
     X := 1;
     Y := 1;
     Z := 1;
@@ -2473,14 +2475,14 @@ Definition dfib (n : nat) : decorated := <{
       Y := T;
       X := 1 + X
     end
-      {{ Z = ap fib X /\ Y = ap fib (X - 1)}}
+      {{ Z = ap fib X /\ Y = ap fib (X - 1)}} ->>>
       {{ Y = fib n }}
 }>.
 
 (* Theorem dfib_correct : forall n,
   dec_correct (dfib n).
 Proof.
-  intros. verify. assert (fib (st X) + fib (pred (st X)) = fib (S (st X))). 
+  verify. assert (fib (st X) + fib (pred (st X)) = fib (S (st X))). 
   { apply fib_eqn. assumption. } simpl in H0. 
   assert (st X - 1 = pred(st X)) by lia. rewrite H1. assumption. 
   rewrite sub_0_r. reflexivity. simpl. rewrite sub_0_r. reflexivity. 
