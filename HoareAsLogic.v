@@ -22,6 +22,7 @@ From PLF Require Import Maps.
 From PLF Require Import Imp.
 Hint Constructors ceval : core.
 From PLF Require Import Hoare.
+From Coq Require Import Bool.Bool. 
 
 (* ################################################################# *)
 (** * Hoare Logic and Model Theory *)
@@ -238,7 +239,14 @@ Qed.
 Theorem provable_true_post : forall c P,
     derivable P c True.
 Proof.
-  (* FILL IN HERE *) Admitted.
+  intros c. induction c. 
+  - intros. eapply H_Consequence. apply (H_Skip P). eauto. eauto. 
+  - intros. eapply H_Consequence. apply (H_Asgn True). eauto. eauto. 
+  - intros. eapply H_Consequence with (P' := P). eapply H_Seq. 
+    apply IHc1. apply IHc2. eauto. eauto. 
+  - intros. apply H_If. apply IHc1. apply IHc2. 
+  - intros. eapply H_Consequence. apply H_While. apply IHc. eauto. eauto. 
+Qed.
 
 (** [] *)
 
@@ -250,7 +258,16 @@ Proof.
 Theorem provable_false_pre : forall c Q,
     derivable False c Q.
 Proof.
-  (* FILL IN HERE *) Admitted.
+  intros c. induction c. 
+  - intros. eapply H_Consequence. apply (H_Skip Q). intros. contradiction. eauto. 
+  - intros. eapply H_Consequence. apply (H_Asgn False). intros. contradiction. intros. contradiction. 
+  - intros. eapply H_Consequence. eapply H_Seq. apply IHc1. apply IHc2. eauto. eauto. 
+  - intros. apply H_If. eapply H_Consequence_pre. apply IHc1. intros. destruct H as [H _]. contradiction. 
+    eapply H_Consequence_pre. apply IHc2. intros. destruct H as [H _]. contradiction. 
+  - intros. eapply H_Consequence_post. apply H_While. eapply H_Consequence_pre. apply IHc. 
+    intros. destruct H as [H _]. contradiction. intros. 
+    unfold assn_sub in H. destruct H as [H _]. contradiction. 
+Qed.
 
 (** [] *)
 
@@ -288,7 +305,14 @@ Proof.
 Theorem hoare_sound : forall P c Q,
   derivable P c Q -> valid P c Q.
 Proof.
-  (* FILL IN HERE *) Admitted.
+  intros. induction X. 
+  - apply hoare_skip. 
+  - apply hoare_asgn. 
+  - eapply hoare_seq. apply IHX2. apply IHX1. 
+  - apply hoare_if. apply IHX1. apply IHX2. 
+  - apply hoare_while. apply IHX. 
+  - eapply hoare_consequence. apply IHX. assumption. assumption. 
+Qed.
 (** [] *)
 
 (** The proof of completeness is more challenging.  To carry out the
@@ -333,7 +357,8 @@ Proof. eauto. Qed.
 Lemma wp_seq : forall P Q c1 c2,
     derivable P c1 (wp c2 Q) -> derivable (wp c2 Q) c2 Q -> derivable P <{c1; c2}> Q.
 Proof.
-  (* FILL IN HERE *) Admitted.
+  intros. eapply H_Seq. apply X. apply X0. 
+Qed.
 
 (** [] *)
 
@@ -346,7 +371,10 @@ Proof.
 Lemma wp_invariant : forall b c Q,
     valid (wp <{while b do c end}> Q /\ b) c (wp <{while b do c end}> Q).
 Proof.
-  (* FILL IN HERE *) Admitted.
+  intros. unfold valid. unfold wp. intros. destruct H0 as [H0 H2]. 
+  assert (st =[while b do c end ]=> s'). { eapply E_WhileTrue. assumption. apply H. apply H1. }
+  apply H0 in H3. assumption. 
+Qed.
 
 (** [] *)
 
@@ -368,7 +396,23 @@ Theorem hoare_complete: forall P c Q,
 Proof.
   unfold valid. intros P c. generalize dependent P.
   induction c; intros P Q HT.
-  (* FILL IN HERE *) Admitted.
+  - eapply H_Consequence_post. apply H_Skip. intros st. 
+    apply HT with (st' := st). apply E_Skip. 
+  - eapply H_Consequence_pre. apply H_Asgn. intros st. 
+    unfold assn_sub. apply HT. apply E_Ass. reflexivity. 
+  - apply wp_seq. apply IHc1. unfold wp. intros. eapply HT. 
+    eapply E_Seq. apply H. apply H1. apply H0. apply IHc2. unfold wp. intros. 
+    apply H0 in H. apply H. 
+  - apply H_If. apply IHc1. intros. assert (st =[ if b then c1 else c2 end ]=> st'). 
+    { apply E_IfTrue. apply H0. apply H. } apply HT in H1. apply H1. apply H0. 
+    apply IHc2. intros. apply HT with (st := st). apply E_IfFalse.  
+    destruct H0 as [H0 H1]. simpl in H1. apply not_true_is_false in H1. apply H1. 
+    apply H. apply H0. 
+  - eapply H_Consequence. apply H_While. apply IHc. apply wp_invariant. 
+    unfold wp. intros. apply (HT st s'). apply H0. apply H. intros. unfold wp in H.
+    destruct H as [H H1]. apply H. 
+    apply E_WhileFalse. simpl in H1. apply not_true_is_false in H1. assumption. 
+Qed.
 
 (** [] *)
 
